@@ -3,16 +3,28 @@ import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 from LaFan import LaFan1
 from torch.utils.data import Dataset, DataLoader
-from model import StateEncoder, OffsetEncoder, TargetEncoder, LSTM, Decoder, ShortMotionDiscriminator, LongMotionDiscriminator
+from model import StateEncoder, \
+                  OffsetEncoder, \
+                  TargetEncoder, \
+                  LSTM, \
+                  Decoder, \
+                  ShortMotionDiscriminator, \
+                  LongMotionDiscriminator
 from skeleton import Skeleton
 import torch.optim as optim
+from tensorboardX import SummaryWriter
 import numpy as np
-import imageio
+from tqdm import tqdm
 from functions import gen_ztta
+import yaml
+import time
+import shutil
+import imageio
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import axes3d, Axes3D
 
 def plot_pose(pose, cur_frame, prefix):
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import axes3d, Axes3D
+    
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
@@ -34,112 +46,73 @@ def plot_pose(pose, cur_frame, prefix):
 
     plt.draw()
     plt.savefig(prefix + '_' + str(cur_frame)+'.png', dpi=200, bbox_inches='tight')
+    plt.close()
 
 if __name__ == '__main__':
-    # os.system('conda deactivate')
-    # os.system('conda activate mobet')
+    opt = yaml.load(open('./config/test-base.yaml', 'r').read())
+    model_dir =opt['test']['model_dir']
+
     
-    ## hyper parameter ##
-    seq_length = 50
-    batch_size = 32
-    state_input_dim = 95
-    offset_input_dim = 91
-    target_input_dim = 88
-    lstm_dim = 768
-    data_dir = '/media/xjwxjw/626898FF2DF873F3/D/ubisoft-laforge-animation-dataset/lafan1/lafan1'
-    lr = 1e-3
-    beta1 = 0.5
-    beta2 = 0.9
-    loss_pos_weight = 1.0
-    loss_quat_weight = 1.0
-    loss_root_weight = 0.5
-    loss_contact_weight = 0.1
-    num_epoch = 1
-    weight_decay = 1e-5
-
     ## initilize the skeleton ##
-    skeleton_mocap = Skeleton(offsets=[
-       [-42.198200,91.614723,-40.067841],
-       [ 0.103456,1.857829,10.548506],
-       [43.499992,-0.000038,-0.000002],
-       [42.372192,0.000015,-0.000007],
-       [ 17.299999,-0.000002,0.000003],
-       [0.000000,0.000000,0.000000],
-
-       [0.103457,1.857829,-10.548503],
-       [43.500042,-0.000027,0.000008],
-       [42.372257,-0.000008,0.000014],
-       [17.299992,-0.000005,0.000004],
-       [0.000000,0.000000,0.000000],
-
-       [6.901968,-2.603733,-0.000001],
-       [12.588099,0.000002,0.000000],
-       [12.343206,0.000000,-0.000001],
-       [25.832886,-0.000004,0.000003],
-       [11.766620,0.000005,-0.000001],
-       [0.000000,0.000000,0.000000],
-
-       [19.745899,-1.480370,6.000108],
-       [11.284125,-0.000009,-0.000018],
-       [33.000050,0.000004,0.000032],
-       [25.200008,0.000015,0.000008],
-       [0.000000,0.000000,0.000000],
-
-       [19.746099,-1.480375,-6.000073],
-       [11.284138,-0.000015,-0.000012],
-       [33.000092,0.000017,0.000013],
-       [25.199780,0.000135,0.000422],
-       [0.000000,0.000000,0.000000]
-    ],
-    parents=[-1,  0,  1,  2,  3,  4,\
-              0,  6,  7,  8,  9,\
-              0, 11, 12, 13, 14, 15,\
-              13, 17, 18, 19, 20, 
-              13, 22, 23, 24, 25])
+    skeleton_mocap = Skeleton(offsets=opt['data']['offsets'], parents=opt['data']['parents'])
     skeleton_mocap.cuda()
-    skeleton_mocap.remove_joints([5,10,16,21,26])
+    skeleton_mocap.remove_joints(opt['data']['joints_to_remove'])
 
-    ## load data ##
-    lafan_data = LaFan1(data_dir, seq_len = seq_length, train = True, debug=False)
-    x_mean = lafan_data.x_mean.cuda()
-    x_std = lafan_data.x_std.cuda().view(1, 1, 22, 3)
-    lafan_loader = DataLoader(lafan_data, batch_size=32, shuffle=True, num_workers=4)
+    ## load train data ##
+    lafan_data_test = LaFan1(opt['data']['data_dir'], \
+                              seq_len = opt['model']['seq_length'], \
+                              train = True, debug=opt['test']['debug'])
+    x_mean = lafan_data_test.x_mean.cuda()
+    x_std = lafan_data_test.x_std.cuda().view(1, 1, opt['model']['num_joints'], 3)
+    lafan_loader_train = DataLoader(lafan_data_test, \
+                                    batch_size=opt['test']['batch_size'], \
+                                    shuffle=True, num_workers=opt['data']['num_workers'])
 
-    ## initialize model ##
-    state_encoder = StateEncoder(in_dim=state_input_dim).cuda()
-    state_encoder.load_state_dict(torch.load('../model/state_encoder.pkl'))
-    offset_encoder = OffsetEncoder(in_dim=offset_input_dim).cuda()
-    offset_encoder.load_state_dict(torch.load('../model/offset_encoder.pkl'))
-    target_encoder = TargetEncoder(in_dim=target_input_dim).cuda()
-    offset_encoder.load_state_dict(torch.load('../model/offset_encoder.pkl'))
-    lstm = LSTM(in_dim=lstm_dim, hidden_dim = lstm_dim * 2).cuda()
-    lstm.load_state_dict(torch.load('../model/lstm.pkl'))
-    decoder = Decoder(in_dim=lstm_dim * 2, out_dim=state_input_dim).cuda()
-    decoder.load_state_dict(torch.load('../model/decoder.pkl'))
-    print("model loaded")
+    ## initialize model and load parameters ##
+    state_encoder = StateEncoder(in_dim=opt['model']['state_input_dim'])
+    state_encoder = state_encoder.cuda()
+    state_encoder.load_state_dict(torch.load(os.path.join(opt['test']['model_dir'], 'state_encoder.pkl')))
+    offset_encoder = OffsetEncoder(in_dim=opt['model']['offset_input_dim'])
+    offset_encoder = offset_encoder.cuda()
+    offset_encoder.load_state_dict(torch.load(os.path.join(opt['test']['model_dir'], 'offset_encoder.pkl')))
+    target_encoder = TargetEncoder(in_dim=opt['model']['target_input_dim'])
+    target_encoder = target_encoder.cuda()
+    target_encoder.load_state_dict(torch.load(os.path.join(opt['test']['model_dir'], 'target_encoder.pkl')))
+    lstm = LSTM(in_dim=opt['model']['lstm_dim'], hidden_dim = opt['model']['lstm_dim'] * 2)
+    lstm = lstm.cuda()
+    lstm.load_state_dict(torch.load(os.path.join(opt['test']['model_dir'], 'lstm.pkl')))
+    decoder = Decoder(in_dim=opt['model']['lstm_dim'] * 2, out_dim=opt['model']['state_input_dim'])
+    decoder = decoder.cuda()
+    decoder.load_state_dict(torch.load(os.path.join(opt['test']['model_dir'], 'decoder.pkl')))
+    print('model loaded')
+
     ## get positional code ##
-    if use_ztta:
+    if opt['test']['use_ztta']:
         ztta = gen_ztta().cuda()
     # print('ztta:', ztta.size())
     # assert 0
-
-    state_encoder.eval()
-    offset_encoder.eval()
-    target_encoder.eval()
-    lstm.eval()
-    decoder.eval()
-    for epoch in range(num_epoch):
+    
+    # writer = SummaryWriter(log_dir)
+    loss_total_min = 10000000.0
+    for epoch in range(opt['test']['num_epoch']):
+        state_encoder.eval()
+        offset_encoder.eval()
+        target_encoder.eval()
+        lstm.eval()
+        decoder.eval()
+        loss_total_list = []
         pred_img_list = []
         gt_img_list = []
         img_list = []
-        bs = np.random.choice(batch_size, 1)[0]
-        for i_batch, sampled_batch in enumerate(lafan_loader):
+        for i_batch, sampled_batch in enumerate(lafan_loader_train):
             # print(i_batch, sample_batched['local_q'].size())
+            bs = np.random.choice(opt['test']['batch_size'], 1)[0]
             loss_pos = 0
             loss_quat = 0
             loss_contact = 0
             loss_root = 0
             with torch.no_grad():
+                # if True:
                 # state input
                 local_q = sampled_batch['local_q'].cuda()
                 root_v = sampled_batch['root_v'].cuda()
@@ -166,7 +139,9 @@ if __name__ == '__main__':
                 
                 lstm.init_hidden(local_q.size(0))
                 h_list = []
-                for t in range(seq_length - 1):
+                pred_list = []
+                pred_list.append(X[:,0])
+                for t in range(opt['model']['seq_length'] - 1):
                     # root pos
                     if t  == 0:
                         root_p_t = root_p[:,t]
@@ -183,8 +158,6 @@ if __name__ == '__main__':
                     # state input
                     state_input = torch.cat([local_q_t, root_v_t, contact_t], -1)
                     # offset input
-                    # print('root_p_offset:', root_p_offset.size(), 'root_p_t:', root_p_t.size())
-                    # print('local_q_offset:', local_q_offset.size(), 'local_q_t:', local_q_t.size())
                     root_p_offset_t = root_p_offset - root_p_t
                     local_q_offset_t = local_q_offset - local_q_t
                     # print('root_p_offset_t:', root_p_offset_t.size(), 'local_q_offset_t:', local_q_offset_t.size())
@@ -197,26 +170,34 @@ if __name__ == '__main__':
                     h_state = state_encoder(state_input)
                     h_offset = offset_encoder(offset_input)
                     h_target = target_encoder(target_input)
-                    if use_ztta:
+                    
+                    if opt['test']['use_ztta']:
                         h_state += ztta[:, t]
                         h_offset += ztta[:, t]
                         h_target += ztta[:, t]
-                    # print('h_state:', h_state.size(),\
-                    #       'h_offset:', h_offset.size(),\
-                    #       'h_target:', h_target.size())
+
+                    if opt['test']['use_adv']:
+                        if t < 5:
+                            lambda_target = 0.0
+                        elif t >=5 and t < 30:
+                            lambda_target = (t - 5) / 25.0
+                        else:
+                            lambda_target = 1.0
+                        h_offset += 0.5 * lambda_target * torch.cuda.FloatTensor(h_offset.size()).normal_()
+                        h_target += 0.5 * lambda_target * torch.cuda.FloatTensor(h_target.size()).normal_()
 
                     h_in = torch.cat([h_state, h_offset, h_target], -1).unsqueeze(0)
                     h_out = lstm(h_in)
                     # print('h_out:', h_out.size())
                 
                     h_pred, contact_pred = decoder(h_out)
-                    local_q_v_pred = h_pred[:,:,:target_input_dim]
+                    local_q_v_pred = h_pred[:,:,:opt['model']['target_input_dim']]
                     local_q_pred = local_q_v_pred + local_q_t
                     # print('q_pred:', q_pred.size())
                     local_q_pred_ = local_q_pred.view(local_q_pred.size(0), local_q_pred.size(1), -1, 4)
                     local_q_pred_ = local_q_pred_ / torch.norm(local_q_pred_, dim = -1, keepdim = True)
 
-                    root_v_pred = h_pred[:,:,target_input_dim:]
+                    root_v_pred = h_pred[:,:,opt['model']['target_input_dim']:]
                     root_pred = root_v_pred + root_p_t
                     # print(''contact:'', contact_pred.size())
                     # print('root_pred:', root_pred.size())
@@ -227,39 +208,42 @@ if __name__ == '__main__':
                     local_q_next = local_q_next.view(local_q_next.size(0), -1)
                     root_p_next = root_p[:,t+1]
                     contact_next = contact[:,t+1]
-                    # print(pos_pred.size(), pos_next.size())
-                    # print(local_q_pred.size(), local_q_next.size())
-                    # print(root_pred.size(), root_p_next.size())
-                    # print(contact_pred.size(), contact_next.size())
-                    loss_pos += torch.mean(torch.abs(pos_pred[0] - pos_next) / x_std) / seq_length
-                    loss_quat += torch.mean(torch.abs(local_q_pred[0] - local_q_next)) / seq_length
-                    loss_root += torch.mean(torch.abs(root_pred[0] - root_p_next) / x_std[:,:,0]) / seq_length
-                    loss_contact += torch.mean(torch.abs(contact_pred[0] - contact_next)) / seq_length
+                    # print(pos_pred.size(), x_std.size())
+                    loss_pos += torch.mean(torch.abs(pos_pred[0] - pos_next) / x_std) / opt['model']['seq_length']
+                    loss_quat += torch.mean(torch.abs(local_q_pred[0] - local_q_next)) / opt['model']['seq_length']
+                    loss_root += torch.mean(torch.abs(root_pred[0] - root_p_next) / x_std[:,:,0]) / opt['model']['seq_length']
+                    loss_contact += torch.mean(torch.abs(contact_pred[0] - contact_next)) / opt['model']['seq_length']
+                    pred_list.append(pos_pred[0])
 
                     if i_batch == 0:
                         # print("pos_pred:", pos_pred.size())
-                        plot_pose(pos_pred[0, bs].view(22, 3).detach().cpu().numpy(), t, '../results/pred')
-                        plot_pose(X[bs,t+1].view(22, 3).detach().cpu().numpy(), t, '../results/gt')
-                        pred_img = imageio.imread('../results/pred_'+str(t)+'.png')
-                        gt_img = imageio.imread('../results/gt_'+str(t)+'.png')
-                        pred_img_list.append(pred_img)
-                        gt_img_list.append(gt_img)
-                        img_list.append(np.concatenate([pred_img, gt_img], 1))
+                        if opt['test']['save_img']:
+                            plot_pose(pos_pred[0, bs].view(22, 3).detach().cpu().numpy(), t, '../results/pred')
+                            plot_pose(X[bs,t+1].view(22, 3).detach().cpu().numpy(), t, '../results/gt')
+                            pred_img = imageio.imread('../results/pred_'+str(t)+'.png')
+                            gt_img = imageio.imread('../results/gt_'+str(t)+'.png')
+                            pred_img_list.append(pred_img)
+                            gt_img_list.append(gt_img)
+                            img_list.append(np.concatenate([pred_img, gt_img], 1))
+                        
                 if i_batch == 0:
-                    imageio.mimsave('../img.gif', img_list, duration=0.1)
+                    if opt['test']['save_img'] and opt['test']['save_gif']:
+                        imageio.mimsave('../img.gif', img_list, duration=0.1)
+                if opt['test']['save_pose']:
+                    gt_pose = X[bs,:].view(opt['model']['seq_length'], 22, 3).detach().cpu().numpy()
+                    pred_pose = torch.cat([x[bs].unsqueeze(0) for x in pred_list], 0).detach().cpu().numpy()
+                    plt.clf()
+                    joint_idx = 13
+                    plt.plot(range(opt['model']['seq_length']), gt_pose[:,joint_idx,0])
+                    plt.plot(range(opt['model']['seq_length']), pred_pose[:,joint_idx,0])
+                    plt.legend(['gt', 'pred'])
+                    plt.savefig('../results/pose_%03d.png' % i_batch)
+                    plt.close()
 
-                if i_batch > 0:
+                if opt['test']['save_img'] and i_batch > 0:
                     break
 
-                print("epoch: %03d, batch: %03d, pos: %.3f, quat: %.3f, root: %.3f, cont: %.3f"%\
-                              (epoch, \
-                              i_batch, \
-                              loss_pos.item(), \
-                              loss_quat.item(), \
-                              loss_root.item(), \
-                              loss_contact.item()))
-
-                    
-
+                if opt['test']['save_pose'] and i_batch > 49:
+                    break
                 
-                
+        # print("train epoch: %03d, cur total loss:%.3f, cur best loss:%.3f" % (epoch, loss_total_cur, loss_total_min))
