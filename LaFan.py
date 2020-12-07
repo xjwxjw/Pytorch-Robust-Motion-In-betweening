@@ -79,7 +79,7 @@ class LaFan1(Dataset):
         if self.debug:
             idx_ = 0
         else:
-            idx_ = idx % 10
+            idx_ = idx
         sample = {}
         sample['local_q'] = self.data['local_q'][idx_].astype(np.float32)
         sample['root_v'] = self.data['root_v'][idx_].astype(np.float32)
