@@ -15,13 +15,14 @@ import torch.optim as optim
 from tensorboardX import SummaryWriter
 import numpy as np
 from tqdm import tqdm
-from functions import gen_ztta
+from functions import gen_ztta, write_to_bvhfile
 import yaml
 import time
 import shutil
 import imageio
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d, Axes3D
+# from remove_fs import remove_fs
 
 def plot_pose(pose, cur_frame, prefix):
     
@@ -29,7 +30,10 @@ def plot_pose(pose, cur_frame, prefix):
     ax = fig.add_subplot(111, projection='3d')
 
     ax.cla()
-    ax.scatter(pose[:, 0], pose[:, 2], pose[:, 1])
+    num_joint = pose.shape[0] // 3
+    ax.scatter(pose[:num_joint, 0], pose[:num_joint, 2], pose[:num_joint, 1], c='r')
+    ax.scatter(pose[num_joint:num_joint*2, 0], pose[num_joint:num_joint*2, 2], pose[num_joint:num_joint*2, 1],c='b')
+    ax.scatter(pose[num_joint*2:num_joint*3, 0], pose[num_joint*2:num_joint*3, 2], pose[num_joint*2:num_joint*3, 1],c='g')
     xmin = np.min(pose[:, 0])
     ymin = np.min(pose[:, 2])
     zmin = np.min(pose[:, 1])
@@ -101,12 +105,14 @@ if __name__ == '__main__':
         lstm.eval()
         decoder.eval()
         loss_total_list = []
-        pred_img_list = []
-        gt_img_list = []
-        img_list = []
+        
         for i_batch, sampled_batch in enumerate(lafan_loader_train):
+            pred_img_list = []
+            gt_img_list = []
+            img_list = []
+
             # print(i_batch, sample_batched['local_q'].size())
-            bs = np.random.choice(opt['test']['batch_size'], 1)[0]
+            
             loss_pos = 0
             loss_quat = 0
             loss_contact = 0
@@ -128,7 +134,7 @@ if __name__ == '__main__':
                 root_p = sampled_batch['root_p'].cuda()
                 # X
                 X = sampled_batch['X'].cuda()
-
+                bs = np.random.choice(X.size(0), 1)[0]
                 if False:
                     print('local_q:', local_q.size(), \
                         'root_v:', root_v.size(), \
@@ -141,6 +147,9 @@ if __name__ == '__main__':
                 h_list = []
                 pred_list = []
                 pred_list.append(X[:,0])
+                bvh_list = []
+                bvh_list.append(torch.cat([X[:,0,0], local_q[:,0,].view(local_q.size(0), -1)], -1))
+                # print(X.size())
                 for t in range(opt['model']['seq_length'] - 1):
                     # root pos
                     if t  == 0:
@@ -196,11 +205,12 @@ if __name__ == '__main__':
                     # print('q_pred:', q_pred.size())
                     local_q_pred_ = local_q_pred.view(local_q_pred.size(0), local_q_pred.size(1), -1, 4)
                     local_q_pred_ = local_q_pred_ / torch.norm(local_q_pred_, dim = -1, keepdim = True)
-
+                    # print("local_q_pred_:", local_q_pred_.size())
                     root_v_pred = h_pred[:,:,opt['model']['target_input_dim']:]
                     root_pred = root_v_pred + root_p_t
                     # print(''contact:'', contact_pred.size())
                     # print('root_pred:', root_pred.size())
+                    bvh_list.append(torch.cat([root_pred[0], local_q_pred_[0].view(local_q_pred_.size(1), -1)], -1))
                     pos_pred = skeleton_mocap.forward_kinematics(local_q_pred_, root_pred)
 
                     pos_next = X[:,t+1]
@@ -215,20 +225,32 @@ if __name__ == '__main__':
                     loss_contact += torch.mean(torch.abs(contact_pred[0] - contact_next)) / opt['model']['seq_length']
                     pred_list.append(pos_pred[0])
 
-                    if i_batch == 0:
+                    if i_batch < 49:
                         # print("pos_pred:", pos_pred.size())
                         if opt['test']['save_img']:
-                            plot_pose(pos_pred[0, bs].view(22, 3).detach().cpu().numpy(), t, '../results/pred')
-                            plot_pose(X[bs,t+1].view(22, 3).detach().cpu().numpy(), t, '../results/gt')
+                            plot_pose(np.concatenate([X[bs,0].view(22, 3).detach().cpu().numpy(),\
+                                                 pos_pred[0, bs].view(22, 3).detach().cpu().numpy(),\
+                                                 X[bs,-1].view(22, 3).detach().cpu().numpy()], 0),\
+                                                 t, '../results/pred')
+                            plot_pose(np.concatenate([X[bs,0].view(22, 3).detach().cpu().numpy(),\
+                                                 X[bs,t+1].view(22, 3).detach().cpu().numpy(),\
+                                                 X[bs,-1].view(22, 3).detach().cpu().numpy()], 0),\
+                                                 t, '../results/gt')
                             pred_img = imageio.imread('../results/pred_'+str(t)+'.png')
                             gt_img = imageio.imread('../results/gt_'+str(t)+'.png')
                             pred_img_list.append(pred_img)
                             gt_img_list.append(gt_img)
                             img_list.append(np.concatenate([pred_img, gt_img], 1))
-                        
-                if i_batch == 0:
+                if opt['test']['save_bvh']:
+                    # print("bs:", bs)
+                    bvh_data = torch.cat([x[bs].unsqueeze(0) for x in bvh_list], 0).detach().cpu().numpy()
+                    # print('bvh_data:', bvh_data.shape)
+                    write_to_bvhfile(bvh_data, ('../bvh_seq/test_%03d.bvh' % i_batch), opt['data']['joints_to_remove'])
+                    # assert 0
+
+                if i_batch < 49:
                     if opt['test']['save_img'] and opt['test']['save_gif']:
-                        imageio.mimsave('../img.gif', img_list, duration=0.1)
+                        imageio.mimsave(('../gif/img_%03d.gif' % i_batch), img_list, duration=0.1)
                 if opt['test']['save_pose']:
                     gt_pose = X[bs,:].view(opt['model']['seq_length'], 22, 3).detach().cpu().numpy()
                     pred_pose = torch.cat([x[bs].unsqueeze(0) for x in pred_list], 0).detach().cpu().numpy()
@@ -240,7 +262,7 @@ if __name__ == '__main__':
                     plt.savefig('../results/pose_%03d.png' % i_batch)
                     plt.close()
 
-                if opt['test']['save_img'] and i_batch > 0:
+                if opt['test']['save_img'] and i_batch > 49:
                     break
 
                 if opt['test']['save_pose'] and i_batch > 49:
