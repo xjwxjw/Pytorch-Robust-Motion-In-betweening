@@ -21,9 +21,14 @@ import time
 import shutil
 
 if __name__ == '__main__':
+    opt = yaml.load(open('./config/train-base.yaml', 'r').read())
+
     stamp = time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime(time.time()))
+    stamp  = stamp + '-' + opt['train']['method']
     # print(local_time)
     # assert 0
+    if opt['train']['debug']:
+        stamp = 'debug'
     log_dir = os.path.join('../log', stamp)
     model_dir = os.path.join('../model', stamp)
     os.mkdir(log_dir)
@@ -39,7 +44,6 @@ if __name__ == '__main__':
                 shutil.copy(from_file + '/' + f, to_file + '/' + f) 
     copydirs('./', log_dir + '/src')
 
-    opt = yaml.load(open('./config/train-base.yaml', 'r').read())
     ## initilize the skeleton ##
     skeleton_mocap = Skeleton(offsets=opt['data']['offsets'], parents=opt['data']['parents'])
     skeleton_mocap.cuda()
@@ -75,9 +79,9 @@ if __name__ == '__main__':
     decoder = Decoder(in_dim=opt['model']['lstm_dim'] * 2, out_dim=opt['model']['state_input_dim'])
     decoder = decoder.cuda()
     if opt['train']['use_adv']:
-        short_discriminator = ShortMotionDiscriminator(in_dim = (opt['model']['num_joints'] * 3))
+        short_discriminator = ShortMotionDiscriminator(in_dim = (opt['model']['num_joints'] * 3 * 2))
         short_discriminator = short_discriminator.cuda()
-        long_discriminator = LongMotionDiscriminator(in_dim = (opt['model']['num_joints'] * 3))
+        long_discriminator = LongMotionDiscriminator(in_dim = (opt['model']['num_joints'] * 3 * 2))
         long_discriminator = long_discriminator.cuda()
 
     ## get positional code ##
@@ -96,7 +100,7 @@ if __name__ == '__main__':
                                              weight_decay = opt['train']['weight_decay'])
     ## initialize optimizer_d ##
     if opt['train']['use_adv']:
-        optimizer_d = optim.Adam(lr = opt['train']['lr'], params = list(short_discriminator.parameters()) +\
+        optimizer_d = optim.Adam(lr = opt['train']['lr'] * 0.1, params = list(short_discriminator.parameters()) +\
                                              list(long_discriminator.parameters()), \
                                              betas = (opt['train']['beta1'], opt['train']['beta2']), \
                                              weight_decay = opt['train']['weight_decay'])
@@ -226,7 +230,12 @@ if __name__ == '__main__':
                 
                 if opt['train']['use_adv']:
                     fake_input = torch.cat([x.reshape(x.size(0), -1).unsqueeze(-1) for x in pred_list], -1)
+                    fake_v_input = torch.cat([fake_input[:,:,1:] - fake_input[:,:,:-1], torch.zeros_like(fake_input[:,:,0:1]).cuda()], -1)
+                    fake_input = torch.cat([fake_input, fake_v_input], 1)
+
                     real_input = torch.cat([X[:, i].view(X.size(0), -1).unsqueeze(-1) for i in range(opt['model']['seq_length'])], -1)
+                    real_v_input = torch.cat([real_input[:,:,1:] - real_input[:,:,:-1], torch.zeros_like(real_input[:,:,0:1]).cuda()], -1)
+                    real_input = torch.cat([real_input, real_v_input], 1)
                     
                     optimizer_d.zero_grad()
                     short_fake_logits = torch.mean(short_discriminator(fake_input.detach())[:,0], 1)
@@ -298,9 +307,11 @@ if __name__ == '__main__':
             torch.save(offset_encoder.state_dict(), model_dir + '/offset_encoder.pkl')
             torch.save(lstm.state_dict(), model_dir + '/lstm.pkl')
             torch.save(decoder.state_dict(), model_dir + '/decoder.pkl')
+            torch.save(optimizer_g.state_dict(), model_dir + '/optimizer_g.pkl')
             if opt['train']['use_adv']:
                 torch.save(short_discriminator.state_dict(), model_dir + '/short_discriminator.pkl')
                 torch.save(long_discriminator.state_dict(), model_dir + '/long_discriminator.pkl')
+                torch.save(optimizer_d.state_dict(), model_dir + '/optimizer_d.pkl')
         print("train epoch: %03d, cur total loss:%.3f, cur best loss:%.3f" % (epoch, loss_total_cur, loss_total_min))
                     
 
