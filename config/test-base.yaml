@@ -55,5 +55,6 @@ test:
     save_img: True
     save_gif: True
     save_pose: False
+    save_bvh: True
     debug: False
     model_dir: '/home/xjwxjw/D/ubisoft-laforge-animation-dataset/model/2020-12-05-08:35:25'
