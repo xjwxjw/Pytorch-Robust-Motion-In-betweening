@@ -62,3 +62,4 @@ train:
     use_ztta: True
     use_adv: True
     debug: False
+    method: ''
