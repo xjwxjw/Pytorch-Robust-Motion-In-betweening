@@ -6,7 +6,7 @@ model:
     lstm_dim: 768
     num_joints: 22
 data:
-    data_dir: '/media/xjwxjw/626898FF2DF873F3/D/ubisoft-laforge-animation-dataset/lafan1/lafan1'
+    data_dir: 'D:\\ubisoft-laforge-animation-dataset\\lafan1\\lafan1'
     offsets: [
        [-42.198200,91.614723,-40.067841],
        [ 0.103456,1.857829,10.548506],
@@ -46,6 +46,7 @@ data:
               13, 17, 18, 19, 20, 
               13, 22, 23, 24, 25]
     joints_to_remove: [5,10,16,21,26]
+    offset: 10
     num_workers: 4
 test:
     batch_size: 32
@@ -55,6 +56,7 @@ test:
     save_img: True
     save_gif: True
     save_pose: False
-    save_bvh: True
+    save_bvh: False
     debug: False
-    model_dir: '/home/xjwxjw/D/ubisoft-laforge-animation-dataset/model/2020-12-05-08:35:25'
+    version: ''
+    model_dir: 'D:\\ubisoft-laforge-animation-dataset\\model\\2020-12-10-00_55_12-'
