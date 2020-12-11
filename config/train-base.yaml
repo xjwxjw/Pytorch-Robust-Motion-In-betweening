@@ -6,7 +6,7 @@ model:
     lstm_dim: 768
     num_joints: 22
 data:
-    data_dir: '/media/xjwxjw/626898FF2DF873F3/D/ubisoft-laforge-animation-dataset/lafan1/lafan1'
+    data_dir: 'D:\\ubisoft-laforge-animation-dataset\\lafan1\\lafan1'
     offsets: [
        [-42.198200,91.614723,-40.067841],
        [ 0.103456,1.857829,10.548506],
@@ -46,9 +46,11 @@ data:
               13, 17, 18, 19, 20, 
               13, 22, 23, 24, 25]
     joints_to_remove: [5,10,16,21,26]
+    foot_index: [9, 10, 11, 12, 13, 14, 21, 22, 23, 24, 25, 26]
     num_workers: 4
+    offset: 10
 train:
-    batch_size: 32
+    batch_size: 128
     lr: 0.0001
     beta1: 0.5
     beta2: 0.9
@@ -56,10 +58,12 @@ train:
     loss_quat_weight: 1.0
     loss_root_weight: 0.5
     loss_contact_weight: 0.1
+    loss_slide_weight: 0.1
     loss_adv_weight: 0.01
-    num_epoch: 100
+    num_epoch: 200
     weight_decay: 0.00001
     use_ztta: True
     use_adv: True
     debug: False
     method: ''
+    pretrained: 'D:\\ubisoft-laforge-animation-dataset\\model\\2020-12-08-16_22_58-'
