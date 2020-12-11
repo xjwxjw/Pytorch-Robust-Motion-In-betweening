@@ -31,8 +31,10 @@ if __name__ == '__main__':
         stamp = 'debug'
     log_dir = os.path.join('../log', stamp)
     model_dir = os.path.join('../model', stamp)
-    os.mkdir(log_dir)
-    os.mkdir(model_dir)
+    if not os.path.exists(log_dir):
+        os.mkdir(log_dir)
+    if not os.path.exists(model_dir):
+        os.mkdir(model_dir)
     def copydirs(from_file, to_file):
         if not os.path.exists(to_file):  
             os.makedirs(to_file)
@@ -41,7 +43,8 @@ if __name__ == '__main__':
             if os.path.isdir(from_file + '/' + f):  
                 copydirs(from_file + '/' + f, to_file + '/' + f)  
             else:
-                shutil.copy(from_file + '/' + f, to_file + '/' + f) 
+                if '.git' not in from_file:
+                    shutil.copy(from_file + '/' + f, to_file + '/' + f) 
     copydirs('./', log_dir + '/src')
 
     ## initilize the skeleton ##
@@ -52,6 +55,7 @@ if __name__ == '__main__':
     ## load train data ##
     lafan_data_train = LaFan1(opt['data']['data_dir'], \
                               seq_len = opt['model']['seq_length'], \
+                              offset = opt['data']['offset'],\
                               train = True, debug=opt['train']['debug'])
     x_mean = lafan_data_train.x_mean.cuda()
     x_std = lafan_data_train.x_std.cuda().view(1, 1, opt['model']['num_joints'], 3)
@@ -68,6 +72,7 @@ if __name__ == '__main__':
     #                                shuffle=True, num_workers=opt['data']['num_workers'])
 
     ## initialize model ##
+    
     state_encoder = StateEncoder(in_dim=opt['model']['state_input_dim'])
     state_encoder = state_encoder.cuda()
     offset_encoder = OffsetEncoder(in_dim=opt['model']['offset_input_dim'])
@@ -78,11 +83,24 @@ if __name__ == '__main__':
     lstm = lstm.cuda()
     decoder = Decoder(in_dim=opt['model']['lstm_dim'] * 2, out_dim=opt['model']['state_input_dim'])
     decoder = decoder.cuda()
+    if len(opt['train']['pretrained']) > 0:
+        state_encoder.load_state_dict(torch.load(os.path.join(opt['train']['pretrained'], 'state_encoder.pkl')))
+        offset_encoder.load_state_dict(torch.load(os.path.join(opt['train']['pretrained'], 'offset_encoder.pkl')))
+        target_encoder.load_state_dict(torch.load(os.path.join(opt['train']['pretrained'], 'target_encoder.pkl')))
+        lstm.load_state_dict(torch.load(os.path.join(opt['train']['pretrained'], 'lstm.pkl')))
+        decoder.load_state_dict(torch.load(os.path.join(opt['train']['pretrained'], 'decoder.pkl')))
+        print('generator model loaded')
+
     if opt['train']['use_adv']:
         short_discriminator = ShortMotionDiscriminator(in_dim = (opt['model']['num_joints'] * 3 * 2))
         short_discriminator = short_discriminator.cuda()
         long_discriminator = LongMotionDiscriminator(in_dim = (opt['model']['num_joints'] * 3 * 2))
         long_discriminator = long_discriminator.cuda()
+        if len(opt['train']['pretrained']) > 0:
+            short_discriminator.load_state_dict(torch.load(os.path.join(opt['train']['pretrained'], 'short_discriminator.pkl')))
+            long_discriminator.load_state_dict(torch.load(os.path.join(opt['train']['pretrained'], 'long_discriminator.pkl')))
+            print('discriminator model loaded')
+
 
     ## get positional code ##
     if opt['train']['use_ztta']:
@@ -98,12 +116,18 @@ if __name__ == '__main__':
                                              list(decoder.parameters()), \
                                              betas = (opt['train']['beta1'], opt['train']['beta2']), \
                                              weight_decay = opt['train']['weight_decay'])
+    if len(opt['train']['pretrained']) > 0:
+        optimizer_g.load_state_dict(torch.load(os.path.join(opt['train']['pretrained'], 'optimizer_g.pkl')))
+        print('optimizer_g model loaded')
     ## initialize optimizer_d ##
     if opt['train']['use_adv']:
         optimizer_d = optim.Adam(lr = opt['train']['lr'] * 0.1, params = list(short_discriminator.parameters()) +\
                                              list(long_discriminator.parameters()), \
                                              betas = (opt['train']['beta1'], opt['train']['beta2']), \
                                              weight_decay = opt['train']['weight_decay'])
+        if len(opt['train']['pretrained']) > 0:
+            optimizer_d.load_state_dict(torch.load(os.path.join(opt['train']['pretrained'], 'optimizer_d.pkl')))
+            print('optimizer_d model loaded')
     
     writer = SummaryWriter(log_dir)
     loss_total_min = 10000000.0
@@ -254,12 +278,18 @@ if __name__ == '__main__':
                     total_d_loss.backward()
                     optimizer_d.step() 
                 
-
                 optimizer_g.zero_grad()
+                pred_pos = torch.cat([x.reshape(x.size(0), -1).unsqueeze(-1) for x in pred_list], -1)
+                pred_vel = (pred_pos[:,opt['data']['foot_index'],1:] - pred_pos[:,opt['data']['foot_index'],:-1])
+                pred_vel = pred_vel.view(pred_vel.size(0), 4, 3, pred_vel.size(-1))
+                loss_slide = torch.mean(torch.abs(pred_vel * contact[:,:-1].permute(0, 2, 1).unsqueeze(2)))
                 loss_total = opt['train']['loss_pos_weight'] * loss_pos + \
                             opt['train']['loss_quat_weight'] * loss_quat + \
                             opt['train']['loss_root_weight'] * loss_root + \
+                            opt['train']['loss_slide_weight'] * loss_slide + \
                             opt['train']['loss_contact_weight'] * loss_contact
+                
+                
 
                 if opt['train']['use_adv']:
                     short_fake_logits = torch.mean(short_discriminator(fake_input)[:,0], 1)
@@ -287,6 +317,7 @@ if __name__ == '__main__':
                 writer.add_scalar('loss_pos', loss_pos.item(), global_step = epoch * 317 + i_batch)
                 writer.add_scalar('loss_quat', loss_quat.item(), global_step = epoch * 317 + i_batch)
                 writer.add_scalar('loss_root', loss_root.item(), global_step = epoch * 317 + i_batch)
+                writer.add_scalar('loss_slide', loss_slide.item(), global_step = epoch * 317 + i_batch)
                 writer.add_scalar('loss_contact', loss_contact.item(), global_step = epoch * 317 + i_batch)
                 writer.add_scalar('loss_total', loss_total.item(), global_step = epoch * 317 + i_batch)
 
