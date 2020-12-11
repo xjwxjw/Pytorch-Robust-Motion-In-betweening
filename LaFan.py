@@ -9,7 +9,7 @@ import numpy as np
 from lafan1 import extract, utils, benchmarks
 
 class LaFan1(Dataset):
-    def __init__(self, bvh_path, train = False, seq_len = 50, debug = False):
+    def __init__(self, bvh_path, train = False, seq_len = 50, offset = 10, debug = False):
         """
         Args:
             bvh_path (string): Path to the bvh files.
@@ -24,22 +24,25 @@ class LaFan1(Dataset):
         self.debug = debug
         if self.debug:
             self.actors = ['subject1']
+        self.offset = offset
         self.data = self.load_data(bvh_path)
+        self.cur_seq_length = 5
+        
 
     def load_data(self, bvh_path):
         # Get test-set for windows of 65 frames, offset by 40 frames
         print('Building the data set...')
         X, Q, parents, contacts_l, contacts_r = extract.get_lafan1_set(\
-                                                bvh_path, self.actors, window=self.seq_len, offset=40, debug = self.debug)
+                                                bvh_path, self.actors, window=self.seq_len, offset=self.offset, debug = self.debug)
         # Global representation:
         q_glbl, x_glbl = utils.quat_fk(Q, X, parents)
 
-        if self.train:
-            # Global positions stats:
-            x_mean = np.mean(x_glbl.reshape([x_glbl.shape[0], x_glbl.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
-            x_std = np.std(x_glbl.reshape([x_glbl.shape[0], x_glbl.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
-            self.x_mean = torch.from_numpy(x_mean)
-            self.x_std = torch.from_numpy(x_std)
+        # if self.train:
+        # Global positions stats:
+        x_mean = np.mean(x_glbl.reshape([x_glbl.shape[0], x_glbl.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
+        x_std = np.std(x_glbl.reshape([x_glbl.shape[0], x_glbl.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
+        self.x_mean = torch.from_numpy(x_mean)
+        self.x_std = torch.from_numpy(x_std)
 
         input_ = {}
         # The following features are inputs:
@@ -90,6 +93,15 @@ class LaFan1(Dataset):
         sample['root_p'] = self.data['root_p'][idx_].astype(np.float32)
         sample['X'] = self.data['X'][idx_].astype(np.float32)
         
+        # sample['local_q_aug'] = self.data['local_q'][idx_].astype(np.float32)
+        # sample['root_v_aug'] = self.data['root_v'][idx_].astype(np.float32)
+        # sample['contact_aug'] = self.data['contact'][idx_].astype(np.float32)
+        # ## data aug ##
+        # sample['root_p_offset'] = self.data['root_p_offset'][idx_].astype(np.float32)
+        # sample['local_q_offset'] = self.data['local_q_offset'][idx_].astype(np.float32)
+        # sample['target'] = self.data['target'][idx_].astype(np.float32)
+        # sample['root_p'] = self.data['root_p'][idx_].astype(np.float32)
+        # sample['X'] = self.data['X'][idx_].astype(np.float32)
         return sample
 
 if __name__=="__main__":
