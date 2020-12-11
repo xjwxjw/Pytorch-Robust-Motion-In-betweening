@@ -22,6 +22,7 @@ import shutil
 import imageio
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d, Axes3D
+from PIL import Image
 # from remove_fs import remove_fs
 
 def plot_pose(pose, cur_frame, prefix):
@@ -49,7 +50,7 @@ def plot_pose(pose, cur_frame, prefix):
     ax.set_zlim(zmid - scale // 2, zmid + scale // 2)
 
     plt.draw()
-    plt.savefig(prefix + '_' + str(cur_frame)+'.png', dpi=200, bbox_inches='tight')
+    plt.savefig(prefix + '_' + str(cur_frame)+'.png', dpi=200, figsize=(6, 4), bbox_inches='tight')
     plt.close()
 
 if __name__ == '__main__':
@@ -65,12 +66,13 @@ if __name__ == '__main__':
     ## load train data ##
     lafan_data_test = LaFan1(opt['data']['data_dir'], \
                               seq_len = opt['model']['seq_length'], \
-                              train = True, debug=opt['test']['debug'])
+                              offset = 40,\
+                              train = False, debug=opt['test']['debug'])
     x_mean = lafan_data_test.x_mean.cuda()
     x_std = lafan_data_test.x_std.cuda().view(1, 1, opt['model']['num_joints'], 3)
-    lafan_loader_train = DataLoader(lafan_data_test, \
+    lafan_loader_test = DataLoader(lafan_data_test, \
                                     batch_size=opt['test']['batch_size'], \
-                                    shuffle=True, num_workers=opt['data']['num_workers'])
+                                    shuffle=False, num_workers=opt['data']['num_workers'])
 
     ## initialize model and load parameters ##
     state_encoder = StateEncoder(in_dim=opt['model']['state_input_dim'])
@@ -95,6 +97,7 @@ if __name__ == '__main__':
         ztta = gen_ztta().cuda()
     # print('ztta:', ztta.size())
     # assert 0
+    version = opt['test']['version']
     
     # writer = SummaryWriter(log_dir)
     loss_total_min = 10000000.0
@@ -106,7 +109,7 @@ if __name__ == '__main__':
         decoder.eval()
         loss_total_list = []
         
-        for i_batch, sampled_batch in enumerate(lafan_loader_train):
+        for i_batch, sampled_batch in enumerate(lafan_loader_test):
             pred_img_list = []
             gt_img_list = []
             img_list = []
@@ -134,7 +137,7 @@ if __name__ == '__main__':
                 root_p = sampled_batch['root_p'].cuda()
                 # X
                 X = sampled_batch['X'].cuda()
-                bs = np.random.choice(X.size(0), 1)[0]
+                bs = 12#np.random.choice(X.size(0), 1)[0]
                 if False:
                     print('local_q:', local_q.size(), \
                         'root_v:', root_v.size(), \
@@ -149,6 +152,8 @@ if __name__ == '__main__':
                 pred_list.append(X[:,0])
                 bvh_list = []
                 bvh_list.append(torch.cat([X[:,0,0], local_q[:,0,].view(local_q.size(0), -1)], -1))
+                contact_list = []
+                contact_list.append(contact[:,0])
                 # print(X.size())
                 for t in range(opt['model']['seq_length'] - 1):
                     # root pos
@@ -224,6 +229,7 @@ if __name__ == '__main__':
                     loss_root += torch.mean(torch.abs(root_pred[0] - root_p_next) / x_std[:,:,0]) / opt['model']['seq_length']
                     loss_contact += torch.mean(torch.abs(contact_pred[0] - contact_next)) / opt['model']['seq_length']
                     pred_list.append(pos_pred[0])
+                    contact_list.append(contact_pred[0])
 
                     if i_batch < 49:
                         # print("pos_pred:", pos_pred.size())
@@ -231,35 +237,39 @@ if __name__ == '__main__':
                             plot_pose(np.concatenate([X[bs,0].view(22, 3).detach().cpu().numpy(),\
                                                  pos_pred[0, bs].view(22, 3).detach().cpu().numpy(),\
                                                  X[bs,-1].view(22, 3).detach().cpu().numpy()], 0),\
-                                                 t, '../results/pred')
+                                                 t, '../results'+version+'/pred')
                             plot_pose(np.concatenate([X[bs,0].view(22, 3).detach().cpu().numpy(),\
                                                  X[bs,t+1].view(22, 3).detach().cpu().numpy(),\
                                                  X[bs,-1].view(22, 3).detach().cpu().numpy()], 0),\
-                                                 t, '../results/gt')
-                            pred_img = imageio.imread('../results/pred_'+str(t)+'.png')
-                            gt_img = imageio.imread('../results/gt_'+str(t)+'.png')
+                                                 t, '../results'+version+'/gt')
+                            pred_img = Image.open('../results'+version+'/pred_'+str(t)+'.png', 'r')
+                            gt_img = Image.open('../results'+version+'/gt_'+str(t)+'.png', 'r')
                             pred_img_list.append(pred_img)
                             gt_img_list.append(gt_img)
-                            img_list.append(np.concatenate([pred_img, gt_img], 1))
+                            # print(pred_img.shape, gt_img.shape)
+                            img_list.append(np.concatenate([pred_img, gt_img.resize(pred_img.size)], 1))
+                
+                contact_data = torch.cat([x[bs].unsqueeze(0) for x in contact_list], 0).detach().cpu().numpy()
+                # print(contact_data)
                 if opt['test']['save_bvh']:
                     # print("bs:", bs)
                     bvh_data = torch.cat([x[bs].unsqueeze(0) for x in bvh_list], 0).detach().cpu().numpy()
                     # print('bvh_data:', bvh_data.shape)
-                    write_to_bvhfile(bvh_data, ('../bvh_seq/test_%03d.bvh' % i_batch), opt['data']['joints_to_remove'])
+                    write_to_bvhfile(bvh_data, ('../bvh_seq'+version+'/test_%03d.bvh' % i_batch), opt['data']['joints_to_remove'])
                     # assert 0
 
                 if i_batch < 49:
                     if opt['test']['save_img'] and opt['test']['save_gif']:
-                        imageio.mimsave(('../gif/img_%03d.gif' % i_batch), img_list, duration=0.1)
+                        imageio.mimsave(('../gif'+version+'/img_%03d.gif' % i_batch), img_list, duration=0.1)
                 if opt['test']['save_pose']:
                     gt_pose = X[bs,:].view(opt['model']['seq_length'], 22, 3).detach().cpu().numpy()
                     pred_pose = torch.cat([x[bs].unsqueeze(0) for x in pred_list], 0).detach().cpu().numpy()
                     plt.clf()
-                    joint_idx = 13
+                    joint_idx = 3
                     plt.plot(range(opt['model']['seq_length']), gt_pose[:,joint_idx,0])
                     plt.plot(range(opt['model']['seq_length']), pred_pose[:,joint_idx,0])
                     plt.legend(['gt', 'pred'])
-                    plt.savefig('../results/pose_%03d.png' % i_batch)
+                    plt.savefig('../results'+version+'/pose_%03d.png' % i_batch)
                     plt.close()
 
                 if opt['test']['save_img'] and i_batch > 49:
