@@ -24,3 +24,9 @@ python train.py
 ```
 python test.py
 ```
+
+## Work status
+[This sheet](https://docs.google.com/spreadsheets/d/1UhpiTP2QyN1eut8PT26ld14hbsh1qCkTzvO-jR4Dr7I/edit?usp=sharing)
+
+## Demo results
+Synthesized resutls could be downloaded from [this link](https://drive.google.com/file/d/191laFzLBGxE2W3a8uJr7m8GPw-dpnfh1/view?usp=sharing).
