@@ -13,7 +13,7 @@ We provide the code for reproducing the main results, as well as pre-trained mod
 - TensorboardX
 - Pyyaml
 
-Please follow [this repo](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) to download the data. Pretrained model is available at [this link](https://drive.google.com/file/d/1-BjR9CjOwZnpJQs7uW5xY5PAoKF9neC_/view?usp=sharing).
+Please follow [this repo](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) to download the data. Pretrained model is available at [this link](https://drive.google.com/file/d/1_eqiIJA9NFrHfDGnOoo5s0BdKLhgBz1U/view?usp=sharing).
 
 ## For training
 ```
@@ -29,4 +29,4 @@ python test.py
 [This sheet](https://docs.google.com/spreadsheets/d/1UhpiTP2QyN1eut8PT26ld14hbsh1qCkTzvO-jR4Dr7I/edit?usp=sharing)
 
 ## Demo results
-Synthesized resutls could be downloaded from [this link](https://drive.google.com/file/d/191laFzLBGxE2W3a8uJr7m8GPw-dpnfh1/view?usp=sharing).
+Synthesized resutls without foot sliding constraint could be downloaded from [this link](https://drive.google.com/file/d/1137bH0L-_Ri1cpJOjMi9oTUYC0x8v4fG/view?usp=sharing), the results with foot sliding constraint could be downloaded from [this link](https://drive.google.com/file/d/1FIoNyx-_SseJNWrzRjmDqeEpblyYrh3y/view?usp=sharing).
