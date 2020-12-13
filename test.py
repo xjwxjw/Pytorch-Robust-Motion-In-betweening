@@ -22,8 +22,8 @@ import shutil
 import imageio
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d, Axes3D
-from PIL import Image
-# from remove_fs import remove_fs
+from remove_fs import remove_fs, save_bvh_from_network_output
+from foot_sliding.animation_data import y_rotation_from_positions
 
 def plot_pose(pose, cur_frame, prefix):
     
@@ -50,7 +50,7 @@ def plot_pose(pose, cur_frame, prefix):
     ax.set_zlim(zmid - scale // 2, zmid + scale // 2)
 
     plt.draw()
-    plt.savefig(prefix + '_' + str(cur_frame)+'.png', dpi=200, figsize=(6, 4), bbox_inches='tight')
+    plt.savefig(prefix + '_' + str(cur_frame)+'.png', dpi=200, bbox_inches='tight')
     plt.close()
 
 if __name__ == '__main__':
@@ -145,15 +145,20 @@ if __name__ == '__main__':
                         'root_p_offset:', root_p_offset.size(), \
                         'local_q_offset:', local_q_offset.size(), \
                         'target:', target.size())
+                    assert 0
                 
                 lstm.init_hidden(local_q.size(0))
                 h_list = []
+                quat_list = []
+                quat_list.append(local_q[:,0,].view(local_q.size(0), -1, 4))
                 pred_list = []
                 pred_list.append(X[:,0])
                 bvh_list = []
                 bvh_list.append(torch.cat([X[:,0,0], local_q[:,0,].view(local_q.size(0), -1)], -1))
                 contact_list = []
                 contact_list.append(contact[:,0])
+                root_list = []
+                root_list.append(X[:,0,0])
                 # print(X.size())
                 for t in range(opt['model']['seq_length'] - 1):
                     # root pos
@@ -211,8 +216,10 @@ if __name__ == '__main__':
                     local_q_pred_ = local_q_pred.view(local_q_pred.size(0), local_q_pred.size(1), -1, 4)
                     local_q_pred_ = local_q_pred_ / torch.norm(local_q_pred_, dim = -1, keepdim = True)
                     # print("local_q_pred_:", local_q_pred_.size())
+                    quat_list.append(local_q_pred_[0])
                     root_v_pred = h_pred[:,:,opt['model']['target_input_dim']:]
                     root_pred = root_v_pred + root_p_t
+                    root_list.append(root_pred[0])
                     # print(''contact:'', contact_pred.size())
                     # print('root_pred:', root_pred.size())
                     bvh_list.append(torch.cat([root_pred[0], local_q_pred_[0].view(local_q_pred_.size(1), -1)], -1))
@@ -242,21 +249,43 @@ if __name__ == '__main__':
                                                  X[bs,t+1].view(22, 3).detach().cpu().numpy(),\
                                                  X[bs,-1].view(22, 3).detach().cpu().numpy()], 0),\
                                                  t, '../results'+version+'/gt')
-                            pred_img = Image.open('../results'+version+'/pred_'+str(t)+'.png', 'r')
-                            gt_img = Image.open('../results'+version+'/gt_'+str(t)+'.png', 'r')
+                            pred_img = imageio.imread('../results'+version+'/pred_'+str(t)+'.png')
+                            gt_img = imageio.imread('../results'+version+'/gt_'+str(t)+'.png')
                             pred_img_list.append(pred_img)
                             gt_img_list.append(gt_img)
-                            # print(pred_img.shape, gt_img.shape)
-                            img_list.append(np.concatenate([pred_img, gt_img.resize(pred_img.size)], 1))
+                            img_list.append(np.concatenate([pred_img, gt_img], 1))
                 
-                contact_data = torch.cat([x[bs].unsqueeze(0) for x in contact_list], 0).detach().cpu().numpy()
-                # print(contact_data)
+                
+                # print('pivots:', pivots.shape)
+                # print('rot_data.size:', rot_data.shape)
                 if opt['test']['save_bvh']:
                     # print("bs:", bs)
                     bvh_data = torch.cat([x[bs].unsqueeze(0) for x in bvh_list], 0).detach().cpu().numpy()
                     # print('bvh_data:', bvh_data.shape)
-                    write_to_bvhfile(bvh_data, ('../bvh_seq'+version+'/test_%03d.bvh' % i_batch), opt['data']['joints_to_remove'])
+                    write_to_bvhfile(bvh_data, ('../bvh_seq/test_%03d.bvh' % i_batch), opt['data']['joints_to_remove'])
                     # assert 0
+                    contact_data = torch.cat([x[bs].unsqueeze(0) for x in contact_list], 0).detach().cpu().numpy()
+                    rot_data = torch.cat([x[bs].unsqueeze(0) for x in quat_list], 0).detach().cpu().numpy()
+                    root_data = torch.cat([x[bs].unsqueeze(0) for x in root_list], 0).detach().cpu().numpy()
+                    root_data = root_data[:,[2,1,0]].copy()
+                    root_data[:,2] *= -1
+                    pred_pose = torch.cat([x[bs].unsqueeze(0) for x in pred_list], 0).detach().cpu().numpy()
+                    quaters, pivots = y_rotation_from_positions(pred_pose, hips = (1,5), sdrs = (14,18))
+                    motion = np.concatenate([rot_data.reshape(rot_data.shape[0], -1),\
+                                             root_data,\
+                                             pivots], -1)
+                    motion = motion.transpose(1,0)
+                    foot = contact_data.transpose(1,0)
+                    foot[foot > 0.5] = 1.0
+                    foot[foot <= 0.5] = 0.0
+                    # print('foot[0]:',foot[0])
+                    remove_fs(motion, \
+                              foot, \
+                              fid_l=(3, 4), \
+                              fid_r=(7, 8),\
+                              output_path=("../bvh_seq"+version+"/test_%03d.bvh" % i_batch))
+                    # save_bvh_from_network_output(motion, output_path=("../bvh_seq_after/test_%03d.bvh" % i_batch))
+                    
 
                 if i_batch < 49:
                     if opt['test']['save_img'] and opt['test']['save_gif']:
@@ -265,7 +294,7 @@ if __name__ == '__main__':
                     gt_pose = X[bs,:].view(opt['model']['seq_length'], 22, 3).detach().cpu().numpy()
                     pred_pose = torch.cat([x[bs].unsqueeze(0) for x in pred_list], 0).detach().cpu().numpy()
                     plt.clf()
-                    joint_idx = 3
+                    joint_idx = 13
                     plt.plot(range(opt['model']['seq_length']), gt_pose[:,joint_idx,0])
                     plt.plot(range(opt['model']['seq_length']), pred_pose[:,joint_idx,0])
                     plt.legend(['gt', 'pred'])
