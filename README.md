@@ -28,6 +28,7 @@ python test.py
 ## The contribution of foot sliding loss
 The original papaer, foot sliding problem is only post processed. Here I add the [foot sliding loss](https://github.com/xjwxjw/Pytorch-Robust-Motion-In-betweening/blob/386df7490ca2dfe89122952dd75b84506eedf700/train.py#L299) which turned to be effective to further enhance visual quality. Here is an exmaple:
 ![image](https://drive.google.com/uc?export=view&id=1UsIvPuJtuGKvScHE7QTNuDvFnQ79hMjP)
+Images from left to right are orginal implementation, + foot sliding loss, + IK post processing, and ground truth respecitvely. With the help of foot slding loss, the model is able to infer a rational foot contact arrange to reach the target.
 
 ## Work status
 [This sheet](https://docs.google.com/spreadsheets/d/1UhpiTP2QyN1eut8PT26ld14hbsh1qCkTzvO-jR4Dr7I/edit?usp=sharing)
