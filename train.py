@@ -21,16 +21,16 @@ import time
 import shutil
 
 if __name__ == '__main__':
-    opt = yaml.load(open('./config/train-base.yaml', 'r').read())
+    opt = yaml.load(open('.\\config\\train-base.yaml', 'r').read())
 
-    stamp = time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime(time.time()))
+    stamp = time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime(time.time()))
     stamp  = stamp + '-' + opt['train']['method']
     # print(local_time)
     # assert 0
     if opt['train']['debug']:
         stamp = 'debug'
-    log_dir = os.path.join('../log', stamp)
-    model_dir = os.path.join('../model', stamp)
+    log_dir = os.path.join('..\\log', stamp)
+    model_dir = os.path.join('..\\model', stamp)
     if not os.path.exists(log_dir):
         os.mkdir(log_dir)
     if not os.path.exists(model_dir):
@@ -40,12 +40,12 @@ if __name__ == '__main__':
             os.makedirs(to_file)
         files = os.listdir(from_file)  
         for f in files:
-            if os.path.isdir(from_file + '/' + f):  
-                copydirs(from_file + '/' + f, to_file + '/' + f)  
+            if os.path.isdir(from_file + '\\' + f):  
+                copydirs(from_file + '\\' + f, to_file + '\\' + f)  
             else:
                 if '.git' not in from_file:
-                    shutil.copy(from_file + '/' + f, to_file + '/' + f) 
-    copydirs('./', log_dir + '/src')
+                    shutil.copy(from_file + '\\' + f, to_file + '\\' + f) 
+    copydirs('.\\', log_dir + '\\src')
 
     ## initilize the skeleton ##
     skeleton_mocap = Skeleton(offsets=opt['data']['offsets'], parents=opt['data']['parents'])
@@ -59,6 +59,8 @@ if __name__ == '__main__':
                               train = True, debug=opt['train']['debug'])
     x_mean = lafan_data_train.x_mean.cuda()
     x_std = lafan_data_train.x_std.cuda().view(1, 1, opt['model']['num_joints'], 3)
+    if opt['train']['debug']:
+        opt['data']['num_workers'] = 1
     lafan_loader_train = DataLoader(lafan_data_train, \
                                     batch_size=opt['train']['batch_size'], \
                                     shuffle=True, num_workers=opt['data']['num_workers'])
@@ -101,10 +103,6 @@ if __name__ == '__main__':
             long_discriminator.load_state_dict(torch.load(os.path.join(opt['train']['pretrained'], 'long_discriminator.pkl')))
             print('discriminator model loaded')
 
-
-    ## get positional code ##
-    if opt['train']['use_ztta']:
-        ztta = gen_ztta().cuda()
     # print('ztta:', ztta.size())
     # assert 0
 
@@ -138,6 +136,21 @@ if __name__ == '__main__':
         lstm.train()
         decoder.train()
         loss_total_list = []
+
+        if opt['train']['progressive_training']:
+            ## get positional code ##
+            if opt['train']['use_ztta']:
+                ztta = gen_ztta(length = lafan_data_train.cur_seq_length).cuda()
+                if (10 + (epoch // 2)) < opt['model']['seq_length']:
+                    lafan_data_train.cur_seq_length = 10 + (epoch // 2)
+                else:
+                    lafan_data_train.cur_seq_length = opt['model']['seq_length']
+        else:
+            ## get positional code ##
+            if opt['train']['use_ztta']:
+                lafan_data_train.cur_seq_length = opt['model']['seq_length']
+                ztta = gen_ztta(length = opt['model']['seq_length']).cuda()
+                
         for i_batch, sampled_batch in tqdm(enumerate(lafan_loader_train)):
             # print(i_batch, sample_batched['local_q'].size())
             loss_pos = 0
@@ -174,7 +187,8 @@ if __name__ == '__main__':
                 h_list = []
                 pred_list = []
                 pred_list.append(X[:,0])
-                for t in range(opt['model']['seq_length'] - 1):
+                # for t in range(opt['model']['seq_length'] - 1):
+                for t in range(lafan_data_train.cur_seq_length - 1):
                     # root pos
                     if t  == 0:
                         root_p_t = root_p[:,t]
@@ -246,10 +260,10 @@ if __name__ == '__main__':
                     root_p_next = root_p[:,t+1]
                     contact_next = contact[:,t+1]
                     # print(pos_pred.size(), x_std.size())
-                    loss_pos += torch.mean(torch.abs(pos_pred[0] - pos_next) / x_std) / opt['model']['seq_length']
-                    loss_quat += torch.mean(torch.abs(local_q_pred[0] - local_q_next)) / opt['model']['seq_length']
-                    loss_root += torch.mean(torch.abs(root_pred[0] - root_p_next) / x_std[:,:,0]) / opt['model']['seq_length']
-                    loss_contact += torch.mean(torch.abs(contact_pred[0] - contact_next)) / opt['model']['seq_length']
+                    loss_pos += torch.mean(torch.abs(pos_pred[0] - pos_next) / x_std) / lafan_data_train.cur_seq_length #opt['model']['seq_length']
+                    loss_quat += torch.mean(torch.abs(local_q_pred[0] - local_q_next)) / lafan_data_train.cur_seq_length #opt['model']['seq_length']
+                    loss_root += torch.mean(torch.abs(root_pred[0] - root_p_next) / x_std[:,:,0]) / lafan_data_train.cur_seq_length #opt['model']['seq_length']
+                    loss_contact += torch.mean(torch.abs(contact_pred[0] - contact_next)) / lafan_data_train.cur_seq_length #opt['model']['seq_length']
                     pred_list.append(pos_pred[0])
                 
                 if opt['train']['use_adv']:
@@ -257,7 +271,7 @@ if __name__ == '__main__':
                     fake_v_input = torch.cat([fake_input[:,:,1:] - fake_input[:,:,:-1], torch.zeros_like(fake_input[:,:,0:1]).cuda()], -1)
                     fake_input = torch.cat([fake_input, fake_v_input], 1)
 
-                    real_input = torch.cat([X[:, i].view(X.size(0), -1).unsqueeze(-1) for i in range(opt['model']['seq_length'])], -1)
+                    real_input = torch.cat([X[:, i].view(X.size(0), -1).unsqueeze(-1) for i in range(lafan_data_train.cur_seq_length)], -1)
                     real_v_input = torch.cat([real_input[:,:,1:] - real_input[:,:,:-1], torch.zeros_like(real_input[:,:,0:1]).cuda()], -1)
                     real_input = torch.cat([real_input, real_v_input], 1)
                     
