@@ -38,12 +38,14 @@ def parse_args():
     return parser.parse_args()
 
 
-def nrot2anim(nrot):
-    anim = AnimationData.from_network_output(nrot)
+def nrot2anim(filename):
+    anim = AnimationData.from_BVH(filename, downsample=1)
+    # anim = AnimationData.from_network_output(nrot)
     bvh, names, ftime = anim.get_BVH()
     anim = AnimationData.from_rotations_and_root_positions(np.array(bvh.rotations), bvh.positions[:, 0, :])
     glb = anim.get_global_positions(trim=False)
-
+    # print('bvh.rotations:', np.array(bvh.rotations)[0,0])
+    # assert 0
     return (bvh, names, ftime), glb
 
 
@@ -55,8 +57,8 @@ def save_bvh_from_network_output(nrot, output_path):
     BVH.save(output_path, bvh, names, ftime)
 
 
-def remove_fs(anim, foot, output_path, fid_l=(4, 5), fid_r=(9, 10), interp_length=5, force_on_floor=True):
-    (anim, names, ftime), glb = nrot2anim(anim)
+def remove_fs(filename, foot, output_path, fid_l=(4, 5), fid_r=(9, 10), interp_length=5, force_on_floor=False):
+    (anim, names, ftime), glb = nrot2anim(filename)
     T = len(glb)
 
     fid = list(fid_l) + list(fid_r)
@@ -68,6 +70,7 @@ def remove_fs(anim, foot, output_path, fid_l=(4, 5), fid_r=(9, 10), interp_lengt
     # print(floor_height)
     glb[:, :, 1] -= floor_height
     anim.positions[:, 0, 1] -= floor_height
+    glb_cp = glb.copy()
 
     for i, fidx in enumerate(fid):
         fixed = foot[i]  # [T]
@@ -152,26 +155,29 @@ def remove_fs(anim, foot, output_path, fid_l=(4, 5), fid_r=(9, 10), interp_lengt
     if not os.path.exists(os.path.dirname(output_path)):
         os.makedirs(os.path.dirname(output_path))
     BVH.save(output_path, anim, names, ftime)
+    return glb
 
 
 def process_data(filename, style_and_content=True, output_dir=None, selected=None):
 
-    data = torch.load(filename, map_location="cpu")
-    feet = data["foot_contact"]
-    motions = data["trans"]
+    # data = torch.load(filename, map_location="cpu")
+    # feet = data["foot_contact"]
+    # motions = data["trans"]
 
-    if selected is None:
-        selected = range(len(motions))
+    # if selected is None:
+    #     selected = range(len(motions))
 
-    for num in tqdm(selected):
-        foot = feet[num].detach().numpy()
+    # for num in tqdm(selected):
+    for num in range(1):
+        # feet = feet[num].detach().numpy()
         # if style_and_content:
         #     style = styles[num].detach().numpy()
         #     content = contents[num].detach().numpy()
         #     save_bvh_from_network_output(style.copy(), output_path=pjoin(output_dir, "style_%02d.bvh" % num))
         #     save_bvh_from_network_output(content.copy(), output_path=pjoin(output_dir, "content_%02d.bvh" % num))
-
-        motion = motions[num].detach().numpy()
+        motion = np.ones((92, 100))
+        foot = np.zeros((4, 100))
+        # motion = motions[num].detach().numpy()
         save_bvh_from_network_output(motion, output_path=pjoin(output_dir, "raw_%02d.bvh" % num))
         remove_fs(motion, foot, output_path=pjoin(output_dir, "after_%02d.bvh" % num))
 
