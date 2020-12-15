@@ -27,7 +27,7 @@ python test.py
 
 ## The contribution of foot sliding loss
 The original papaer, foot sliding problem is only post processed. Here I add the [foot sliding loss](https://github.com/xjwxjw/Pytorch-Robust-Motion-In-betweening/blob/386df7490ca2dfe89122952dd75b84506eedf700/train.py#L299) which turned to be effective to further enhance visual quality. Here is an exmaple:
-<img src="https://drive.google.com/file/d/1UsIvPuJtuGKvScHE7QTNuDvFnQ79hMjP/view?usp=sharing" align="center"> <br>
+<img src="https://drive.google.com/file/d/1UsIvPuJtuGKvScHE7QTNuDvFnQ79hMjP" align="center"> <br>
 
 ## Work status
 [This sheet](https://docs.google.com/spreadsheets/d/1UhpiTP2QyN1eut8PT26ld14hbsh1qCkTzvO-jR4Dr7I/edit?usp=sharing)
