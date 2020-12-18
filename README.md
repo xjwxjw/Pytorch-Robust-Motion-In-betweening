@@ -15,6 +15,11 @@ We provide the code for reproducing the main results, as well as pre-trained mod
 
 Please follow [this repo](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) to download the data. Pretrained model is available at [this link](https://drive.google.com/file/d/1_eqiIJA9NFrHfDGnOoo5s0BdKLhgBz1U/view?usp=sharing). After downloading this repo, you need: (1) create new dirs named src, log, model, gif, and results repectively; (2) Put all downloaded files in to ./src and pretrained model into ./model.
 
+## For data preparation
+```
+python flip_bvh.py
+```
+
 ## For training
 ```
 python train.py
