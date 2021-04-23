@@ -20,7 +20,7 @@ def gen_ztta(dim = 256, length = 50):
             if d % 2 == 0:
                 ztta[:, t, d] = np.sin(1.0 * (length - t) / 10000 ** (d / dim))
             else:
-                ztta[:, t, d-1] = np.cos(1.0 * (length - t) / 10000 ** (d / dim))
+                ztta[:, t, d] = np.cos(1.0 * (length - t) / 10000 ** (d / dim))
     return torch.from_numpy(ztta.astype(np.float))
 
 def gen_ztar(sigma = 1.0, length = 50):
