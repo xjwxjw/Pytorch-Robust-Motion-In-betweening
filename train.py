@@ -228,6 +228,7 @@ if __name__ == '__main__':
                     #       'h_offset:', h_offset.size(),\
                     #       'h_target:', h_target.size())
                     if opt['train']['use_adv']:
+                        tta = lafan_data_train.cur_seq_length - 2 - t
                         if t < 5:
                             lambda_target = 0.0
                         elif t >=5 and t < 30:
