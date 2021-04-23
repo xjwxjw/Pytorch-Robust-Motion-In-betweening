@@ -212,10 +212,11 @@ if __name__ == '__main__':
                         h_target += ztta[:, t]
 
                     if opt['test']['use_adv']:
-                        if t < 5:
+                        tta = opt['model']['seq_length'] - 2 - t
+                        if tta < 5:
                             lambda_target = 0.0
-                        elif t >=5 and t < 30:
-                            lambda_target = (t - 5) / 25.0
+                        elif tta >=5 and tta < 30:
+                            lambda_target = (tta - 5) / 25.0
                         else:
                             lambda_target = 1.0
                         h_offset += 0.5 * lambda_target * torch.cuda.FloatTensor(h_offset.size()).normal_()
